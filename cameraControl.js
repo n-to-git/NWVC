@@ -31,8 +31,8 @@ let radius = 0.2;
 const autoRangeSetting = true; //true:データの数に応じて範囲を設定　false:グローバル変数を参照
 //削除回数
 const autodeleteSetting = true; //true:データの数に応じて削除回数を設定　false:グローバル変数を参照
-//削除回数
-const autoRadius = false; //true:データの数に応じてnodeの半径を設定　false:グローバル変数を参照
+//半径
+const autoRadius = true; //true:データの数に応じてnodeの半径を設定　false:グローバル変数を参照
 
 
 
