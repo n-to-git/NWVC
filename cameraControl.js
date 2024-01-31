@@ -21,26 +21,23 @@ let nodePositions = [];
 let networkData;
 
 //ノードの離す大きさ
-const coefficient = 3;
+const coefficient = 10;
 
 //半径
 let radius = 0.2;
 
 //自動設定
 //範囲
-const autoRangeSetting = false; //true:データの数に応じて範囲を設定　false:グローバル変数を参照
+const autoRangeSetting = true; //true:データの数に応じて範囲を設定　false:グローバル変数を参照
 //削除回数
 const autodeleteSetting = true; //true:データの数に応じて削除回数を設定　false:グローバル変数を参照
 //削除回数
 const autoRadius = false; //true:データの数に応じてnodeの半径を設定　false:グローバル変数を参照
 
-//OrbitControlsを有効にするか無効にするか
-const Debug = false; //true:OrbitControlsの無効化　false:OrbitControlsの有効化
-
 
 
 function init() {
-  /* ----基本的な設定----- */
+  /* --------------- 基本的な設定 ここから --------------- */
   // WebXRのポリフィルを有効にする
   const polyfill = new WebXRPolyfill();
 
@@ -51,6 +48,10 @@ function init() {
   // シーンの作成
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
+
+  // グループの準備
+  const group = new THREE.Group();
+  scene.add(group);
 
   // レンダラーの作成
   const renderer = new THREE.WebGLRenderer({
@@ -67,8 +68,21 @@ function init() {
 
   // カメラを作成
   const camera = new THREE.PerspectiveCamera(90, width / height);
+  // カメラの初期位置を設定
+  camera.position.z = 10;
 
-  /* --------------- OrbitControls(マウスで動かせる設定) --------------- */
+  // カメラ用コンテナを作成(3Dのカメラ？)
+  const cameraContainer = new THREE.Object3D();
+  cameraContainer.add(camera);
+  scene.add(cameraContainer);
+  cameraContainer.position.x = 0;
+  
+  
+  /* --------------- 基本的な設定 ここまで --------------- */
+
+
+
+  /* --------------- OrbitControls(マウスで動かせる設定)ここから --------------- */
   // OrbitControlsの作成
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; // ダンピングまたは自動回転が有効な場合、アニメーションループが必要です
@@ -89,38 +103,30 @@ function init() {
     inVRMode = false;
     controls.enabled = true; // OrbitControlsを有効にする
   });
-  
   /* --------------- OrbitControls(マウスで動かせる設定)ここまで --------------- */
-
-  // カメラの初期位置を設定
-  camera.position.z = 10;
-
-  // カメラ用コンテナを作成(3Dのカメラ？)
-  const cameraContainer = new THREE.Object3D();
-  cameraContainer.add(camera);
-  scene.add(cameraContainer);
-  cameraContainer.position.x = 0;
   
 
+
+  /* --------------- 光源設定 ここから --------------- */
   // 光源を作成
   createLights(scene);
 
-  // グループの準備
-  const group = new THREE.Group();
-  scene.add(group);
+  // 光源を作成する関数
+  function createLights(scene) {
+    const ambientLight = new THREE.AmbientLight(0x333333);
+    scene.add(ambientLight);
 
-  /* ----コントローラー設定----- */
+    //光源を作成
+    const light = new THREE.DirectionalLight(0xffffff, 0.5);
+    light.position.set(0, 10, 100);
+    scene.add(light);
+  }
+  /* --------------- 光源設定 ここまで --------------- */
+
+
+
+  /* -------------------コントローラー設定 ここから------------------- */
   // コントローラーイベントの設定    squeeze button
-  function onSelectStartL() {
-    this.userData.isSelecting = true;
-    updateRandomNode();
-  }
-
-  function onSelectStartR() {
-    this.userData.isSelecting = true;
-    updateAllNode();
-  }
-
   function onSelectEnd() {
     this.userData.isSelecting = false;
   }
@@ -137,7 +143,6 @@ function init() {
   const line = new THREE.Line(geometry , material);
   line.name = "line";
   line.scale.z = 5;
-
 
   // コントローラーの追加
   function addController(index) {
@@ -162,13 +167,134 @@ function init() {
   const controller1 = addController(1);
 
   // コントローラーのイベントリスナーの追加
-  controller0.addEventListener('selectstart', onSelectStartL);
+  controller0.addEventListener('selectstart', onSelectStart);
   controller0.addEventListener('selectend', onSelectEnd);
-  controller1.addEventListener('selectstart', onSelectStartR);
+  controller1.addEventListener('selectstart', onSelectStart);
   controller1.addEventListener('selectend', onSelectEnd);
 
-  
-  /*   ファイル読み込み   */
+  // トリガーを押した時に呼ばれる
+  function onSelectStart(event) {
+    const controller = event.target;
+    // レイと交差しているシェイプの取得
+    const intersections = getIntersections(controller);
+    // シェイプをコントローラにアタッチし、シェイプを青くする
+    if (intersections.length > 0) {
+      const intersection = intersections[0];
+      const object = intersection.object;
+
+      // 動かす前の座標を保存
+      const originalPosition = { x: object.position.x, y: object.position.y, z: object.position.z };
+
+      // シェイプを青く光らせる
+      object.material.emissive.b = 1;
+
+      // オブジェクトの座標をコントローラーにアタッチ
+      controller.attach(object);
+
+      // コントローラーのユーザーデータに選択されたオブジェクトを保存
+      controller.userData.selected = object;
+
+      // オブジェクトが動かされたときの処理
+      controller.addEventListener('selectend', () => {
+       // nodePositionsに動く前の座標と同じものがあれば、動いた後の座標に変更する
+        const matchingIndex = nodePositions.findIndex(node => (
+          node.x === originalPosition.x && node.y === originalPosition.y && node.z === originalPosition.z
+        ));
+        if (matchingIndex !== -1) {
+          // オブジェクトの座標を更新
+          nodePositions[matchingIndex] = object.position;
+        }
+        //ノードとエッジを消す
+        clearScene();
+        //変更されたノードの位置を再描画
+        renderNetwork(networkData, group, camera, renderer, nodePositions);
+      });
+    }
+  }
+
+  // トリガーを離した時に呼ばれる
+  function onSelectEnd(event) {
+    const controller = event.target;
+
+    // シェイプをグループにアタッチし、シェイプの色を戻す
+    if (controller.userData.selected !== undefined) {
+      const object = controller.userData.selected;
+      object.material.emissive.b = 0;
+      group.attach(object);
+      controller.userData.selected = undefined;
+    }
+  }
+
+  // レイと交差しているシェイプの一覧
+  const intersected = [];
+
+  // シェイプとコントローラのレイの交差判定のクリア
+  function cleanIntersected() {
+    while (intersected.length) {
+      const object = intersected.pop();
+      object.material.emissive.r = 0;
+    }
+  }
+
+  // シェイプとコントローラのレイの交差判定
+  function intersectObjects(controller) {
+    // 選択時は無処理
+    if (controller.userData.selected !== undefined) return;
+
+    // 光線の取得
+    const line = controller.getObjectByName("line");
+
+    // レイと交差しているシェイプの取得
+    const intersections = getIntersections(controller);
+
+    if (intersections.length > 0) {
+      // 交差時は赤くする
+      const intersection = intersections[0];
+      const object = intersection.object;
+      object.material.emissive.r = 1;
+      intersected.push(object);
+
+      // 交差時は光線の長さをシェイプまでにする
+      line.scale.z = intersection.distance;
+    } else {
+      // 光線の長さを固定長に戻す
+      line.scale.z = 5;
+    }
+  }
+
+  // ワーク行列
+  const tempMatrix = new THREE.Matrix4();
+
+  // レイキャスターの準備
+  const raycaster = new THREE.Raycaster();
+
+  // レイと交差しているシェイプの取得
+  function getIntersections(controller) {
+    tempMatrix.identity().extractRotation(controller.matrixWorld);
+    raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+    return raycaster.intersectObjects(group.children, false);
+  }
+
+  // コントローラーイベントの処理
+  function handleController(controller) {
+    const userData = controller.userData;
+    if (userData.isSelecting === true) {
+      // コントローラーボタンが押された際の処理
+      const cube = createCube();
+      cube.position.set(
+        Math.random() * -1000 - 300,  // x座標を-5から5の範囲でランダムに設定
+        0,  // y座標
+        Math.random() * -1000 - 300   // z座標を-5から5の範囲でランダムに設定
+      );
+      scene.add(cube);
+    }
+  }
+  /* -------------------コントローラー設定 ここまで------------------- */
+
+
+
+  /* -------------------ファイル読み込み ここから------------------- */
   loadCSVAndInit(fileName);
   
   // CSVファイルの読み込みとシーンの初期化
@@ -183,10 +309,11 @@ function init() {
           // CSVデータを解析してエッジ情報を取得
           networkData = parseCSV(xhr.responseText);
           autoSetting(networkData);
-          generateRandomNodePositions(networkData);
+          generateRandomNodePositions(networkData, nodePositions);
           if (networkData) {
+            console.log(nodePositions);
             // ネットワークのノードとエッジを描画
-            renderNetwork(networkData, scene, camera, renderer, nodePositions);
+            renderNetwork(networkData, group, camera, renderer, nodePositions);
           } else {
             console.error('Invalid CSV file format');
           }
@@ -201,133 +328,47 @@ function init() {
 
   /*  CSVデータの解析  */
   function parseCSV(content) {
-  const lines = content.split('\n');
-  const edges = [];
+    const lines = content.split('\n');
+    const edges = [];
 
-  // 各行のデータを解析してエッジ情報を構築
-  for (const line of lines) {
-    const [source, target, weight] = line.trim().split(',');
+    // 各行のデータを解析してエッジ情報を構築
+    for (const line of lines) {
+      const [source, target, weight] = line.trim().split(',');
 
-    if (source && target && weight) {
-      edges.push({
-        source: parseInt(source),
-        target: parseInt(target),
-        weight: parseFloat(weight)
-      });
+      if (source && target && weight) {
+        edges.push({
+          source: parseInt(source),
+          target: parseInt(target),
+          weight: parseFloat(weight)
+        });
+      }
     }
+    // エッジ情報が存在する場合、その情報を返す
+    return edges.length > 0 ?  edges  : null;
   }
-  // エッジ情報が存在する場合、その情報を返す
-  return edges.length > 0 ?  edges  : null;
-  }
+  /* -------------------ファイル読み込み ここまで------------------- */
 
 
-  // ネットワークのエッジを描画する関数
-  function createEdge(sourcePosition, targetPosition, weight) {
-  // ここにエッジの描画処理を追加
-  const geometry = new THREE.BufferGeometry().setFromPoints([sourcePosition, targetPosition]);
-  const material = new THREE.LineBasicMaterial({ color: 0xffffff });
-  const edge = new THREE.Line(geometry, material);
-  scene.add(edge);
-  }
 
-  //座標生成
+  /* -------------------座標生成 ここから------------------- */
   function createPositions() {
-  // ランダムな座標を生成
-  const position = {
-    x: Math.random() * (max + 1 - min)  + min,
-    y: Math.random() * (max + 1 - min)  + min,
-    z: Math.random() * (max + 1 - min)  + min
-  };
+    // ランダムな座標を生成
+    const position = {
+      x: Math.random() * (max + 1 - min)  + min,
+      y: Math.random() * (max + 1 - min)  + min,
+      z: Math.random() * (max + 1 - min)  + min
+    };
 
-  // 生成したノードの座標を配列に追加
-  nodePositions.push(position);
+    // 生成したノードの座標を配列に追加
+    nodePositions.push(position);
 
-  // 生成したノードの座標を返す
-  return position;
-  }
-
-  // ランダムな座標を生成して nodePositions 配列に追加する関数
-  function generateRandomNodePositions(edgesData) {
-  const uniqueNodes = new Set();
-  const nodePositions = new Map();
-
-  // グラフのノードとエッジを作成
-  edgesData.forEach(edge => {
-    uniqueNodes.add(edge.source);
-    uniqueNodes.add(edge.target);
-  });
-
-  // 各ノードの座標を保存
-  uniqueNodes.forEach(node => {
-    const position = createPositions();
-    nodePositions.set(node, position);
-  });
-  }
-
-  function renderEdges(edgesData, scene, nodePositions) {
-  edgesData.forEach(edge => {
-    const sourcePosition = nodePositions[edge.source];
-    const targetPosition = nodePositions[edge.target];
-
-    if (sourcePosition && targetPosition) {
-      createEdge(sourcePosition, targetPosition, edge.weight);
-    }
-  });
-  }
-  
-  /*   ネットワーク構造図の生成   */
-
-  function renderNetwork(edgesData, scene, camera, renderer, nodePositions) {
-    // ノードを作成
-    const adjacencyMap = createAdjacencyMap(edgesData);
-    Object.values(nodePositions).forEach((position, index) => {
-      
-     //ノードのジオメトリを作成
-     let geometry;
-     // ノードのマテリアルを作成
-     let material;
-
-     // 通常のノード
-     if (adjacencyMap[index].length <= 1) {
-       // 隣接していないノード（色はカスタマイズ可能）
-       material = new THREE.MeshBasicMaterial({ color: 0xffc0cb });
-       geometry = new THREE.SphereGeometry(radius, 32, 32);
-     } else {
-       // 通常のノード（色はカスタマイズ可能）
-       material = new THREE.MeshBasicMaterial({ color: 0x7fbfff });
-       geometry = new THREE.BoxGeometry(radius * 2, radius * 2, radius * 2);
-
-     }
-
-      const node = new THREE.Mesh(geometry, material);
-      // 新しい座標を生成し、ノードの位置を設定
-      const newPosition = generateNewPosition(index, nodePositions , adjacencyMap);
-      node.position.set(newPosition.x, newPosition.y, newPosition.z);
-      scene.add(node);
-    });
-  
-    // エッジを作成
-    renderEdges(edgesData, scene, nodePositions);
-  
-    // レンダリングループ
-    renderer.setAnimationLoop(() => {
-      renderer.render(scene, camera);
-    });
-  }
-  
-  // 隣接リストを作成する関数
-  function createAdjacencyMap(edgesData) {
-    const adjacencyMap = new Array(nodePositions.length).fill(null).map(() => []);
-    edgesData.forEach(edge => {
-      adjacencyMap[edge.source].push(edge.target);
-      adjacencyMap[edge.target].push(edge.source);
-    });
-    return adjacencyMap;
+    // 生成したノードの座標を返す
+    return position;
   }
 
   // 新しい座標を生成する関数
-  function generateNewPosition(index, nodePositions, adjacencyMap) {
-    const previousNodePosition = index > 0 ? nodePositions[index - 1] : { x: 0, y: 0, z: 0 };
+  function generateNewPosition(index, nodePosi, adjacencyMap) {
+    const previousNodePosition = index > 0 ? nodePosi[index - 1] : { x: 0, y: 0, z: 0 };
     // 連結がない場合、ランダムに離す
     const randomDisplacement = adjacencyMap[index].length <= 1
       //ノードが孤立しているか、1つだけ連結している場合x、y、z 各成分は(Math.random() - 0.5) * 5の変位を加える。
@@ -340,200 +381,277 @@ function init() {
       y: previousNodePosition.y + randomDisplacement.y,
       z: previousNodePosition.z + randomDisplacement.z
     };
-
+    // nodePositions 配列の選択されたノードの位置も更新
     nodePositions[index] = newPosition;
-
-    return newPosition;
   }
+
+  // ランダムな座標を生成して nodePositions 配列に追加する関数
+  function generateRandomNodePositions(edgesData,nodePosi) {
+    const uniqueNodes = new Set();
+    const nodePositions = new Map();
+
+    // グラフのノードとエッジを作成
+    edgesData.forEach(edge => {
+      uniqueNodes.add(edge.source);
+      uniqueNodes.add(edge.target);
+    });
+
+    // 各ノードの座標を保存
+    uniqueNodes.forEach(node => {
+      const position = createPositions();
+      nodePositions.set(node, position);
+    });
+
+    //葉ノードの位置を修正
+    const adjacencyMap = createAdjacencyMap(edgesData);
+    Object.values(nodePosi).forEach((position, index) => {
+      generateNewPosition(index, nodePosi , adjacencyMap);
+    });
+  }
+  /* -------------------座標生成 ここまで------------------- */
+
+
+
+  /* -------------------エッジ生成 ここから------------------- */
+  function createEdge(sourcePosition, targetPosition, weight) {
+    // ここにエッジの描画処理を追加
+    const geometry = new THREE.BufferGeometry().setFromPoints([sourcePosition, targetPosition]);
+    const material = new THREE.LineBasicMaterial({ color: 0xffffff });
+    const edge = new THREE.Line(geometry, material);
+    scene.add(edge);
+  }
+
+  function renderEdges(edgesData, scene, nodePositions) {
+    edgesData.forEach(edge => {
+      const sourcePosition = nodePositions[edge.source];
+      const targetPosition = nodePositions[edge.target];
+
+      if (sourcePosition && targetPosition) {
+        createEdge(sourcePosition, targetPosition, edge.weight);
+      }
+    });
+  }
+  /* -------------------エッジ生成 ここまで------------------- */
+
+
+  
+  /* -------------------ネットワーク構造図の生成 ここから------------------- */
+  function renderNetwork(edgesData, group, camera, renderer, nodePositions) {
+    // ノードを作成
+    const adjacencyMap = createAdjacencyMap(edgesData);
+    Object.values(nodePositions).forEach((position, index) => {
+      //ノードのジオメトリを作成
+      let geometry;
+      //ノードのマテリアルを作成
+      let material;
+
+      // 通常のノード
+      if (adjacencyMap[index].length <= 1) {
+        // 隣接していないノード
+        geometry = new THREE.SphereGeometry(radius, 32, 32);
+        material = new THREE.MeshLambertMaterial({ color: 0xffc0cb });
+      } else {
+        // 通常のノード
+        geometry = new THREE.BoxGeometry(radius * 2, radius * 2, radius * 2);
+        material = new THREE.MeshLambertMaterial({ color: 0x7fbfff });
+      }
+
+      const node = new THREE.Mesh(geometry, material);
+      node.position.set(position.x, position.y, position.z);
+      group.add(node);
+    });
+  
+    // エッジを作成
+    renderEdges(edgesData, scene, nodePositions);
+  
+    // レンダリングループ
+    renderer.setAnimationLoop(() => {
+      renderer.render(scene, camera);
+    });
+  }
+  /* -------------------ネットワーク構造図の生成 ここまで------------------- */
   
 
-  // 光源を作成する関数
-  function createLights(scene) {
-  const spotLight = new THREE.SpotLight(
-    0xffffff,
-    4,
-    2000,
-    Math.PI / 5,
-    0.2,
-    1.5
-  );
-  spotLight.position.set(300, 300, 300);
-  scene.add(spotLight);
 
-  const ambientLight = new THREE.AmbientLight(0x333333);
-  scene.add(ambientLight);
-
-  //光源を作成
-  const light = new THREE.DirectionalLight(0xffffff, 0.5);
-  light.position.set(0, 4, 0);
-  scene.add(light);
+  /* ------------------- 隣接リストを作成 ここから------------------- */
+  function createAdjacencyMap(edgesData) {
+    const adjacencyMap = new Array(nodePositions.length).fill(null).map(() => []);
+    edgesData.forEach(edge => {
+      adjacencyMap[edge.source].push(edge.target);
+      adjacencyMap[edge.target].push(edge.source);
+    });
+    return adjacencyMap;
   }
+  /* ------------------- 隣接リストを作成 ここまで------------------- */
 
-  // コントローラーイベントの処理
-  function handleController(controller) {
-  const userData = controller.userData;
-  if (userData.isSelecting === true) {
-    // コントローラーボタンが押された際の処理
-    const cube = createCube();
-    cube.position.set(
-      Math.random() * -1000 - 300,  // x座標を-5から5の範囲でランダムに設定
-      0,  // y座標
-      Math.random() * -1000 - 300   // z座標を-5から5の範囲でランダムに設定
-    );
-    scene.add(cube);
-  }
-  }
 
-  // リサイズ処理
+
+  
+  /* ------------------- リサイズ処理 ここから------------------- */
   function onResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
   }
+  /* ------------------- 隣接リストを作成 ここまで------------------- */
 
+
+
+  /* -------------------座標の更新 ここから------------------- */
   // すべてのノードの位置を更新する関数
   function updateAllNode() {
-  nodePositions.forEach((position, index) => {
-    const newPosition = {
-      x: Math.random() * (max + 1 - min) + min,
-      y: Math.random() * (max + 1 - min) + min,
-      z: Math.random() * (max + 1 - min) + min
-    };
+    nodePositions.forEach((position, index) => {
+      const newPosition = {
+        x: Math.random() * (max + 1 - min) + min,
+        y: Math.random() * (max + 1 - min) + min,
+        z: Math.random() * (max + 1 - min) + min
+      };
 
-    const node = scene.children.find((child) => child instanceof THREE.Mesh && child.position.equals(position));
-    if (node) {
-      node.position.set(newPosition.x, newPosition.y, newPosition.z);
-    }
+      const node = scene.children.find((child) => child instanceof THREE.Mesh && child.position.equals(position));
+      if (node) {
+        node.position.set(newPosition.x, newPosition.y, newPosition.z);
+      }
 
-    nodePositions[index] = newPosition;
-    //console.log(index);
-  });
-  //ノードとエッジを消す
-  clearScene();
-  //変更されたノードの位置を再描画
-  renderNetwork(networkData, scene, camera, renderer, nodePositions);
+      nodePositions[index] = newPosition;
+      //console.log(index);
+    });
+    //ノードとエッジを消す
+    clearScene();
+    //変更されたノードの位置を再描画
+    renderNetwork(networkData, group, camera, renderer, nodePositions);
 
-  // レンダリング
-  renderer.render(scene, camera);
+    // レンダリング
+    renderer.render(scene, camera);
   }
 
   // ランダムなノードの位置を更新して描画する関数
   function updateRandomNode() {
-  // nodePositions 配列が空でないことを確認
-  if (nodePositions.length > 0) {
-    // ランダムなインデックスを選択
-    const randomIndex = Math.floor(Math.random() * nodePositions.length);
+    // nodePositions 配列が空でないことを確認
+    if (nodePositions.length > 0) {
+      // ランダムなインデックスを選択
+      const randomIndex = Math.floor(Math.random() * nodePositions.length);
 
-    // 選択されたノードの位置を更新
-    const newPosition = {
-      x: Math.random() * (max + 1 - min) + min,
-      y: Math.random() * (max + 1 - min) + min,
-      z: Math.random() * (max + 1 - min) + min
-    };
+      // 選択されたノードの位置を更新
+      const newPosition = {
+        x: Math.random() * (max + 1 - min) + min,
+        y: Math.random() * (max + 1 - min) + min,
+        z: Math.random() * (max + 1 - min) + min
+      };
 
-    // 選択されたノードを取得し、位置を更新
-    const selectedNode = scene.children.find((child) => child instanceof THREE.Mesh &&
-      child.position.equals(nodePositions[randomIndex]));
+      // 選択されたノードを取得し、位置を更新
+      const selectedNode = scene.children.find((child) => child instanceof THREE.Mesh &&
+        child.position.equals(nodePositions[randomIndex]));
 
-    if (selectedNode) {
-      selectedNode.position.set(newPosition.x, newPosition.y, newPosition.z);
+      if (selectedNode) {
+        selectedNode.position.set(newPosition.x, newPosition.y, newPosition.z);
+      }
+
+      // nodePositions 配列の選択されたノードの位置も更新
+      nodePositions[randomIndex] = newPosition;
+
+      //ノードとエッジを消す
+      clearScene();
+      //変更されたノードの位置を再描画
+      renderNetwork(networkData, group, camera, renderer, nodePositions);
+      
+      // レンダリング
+      renderer.render(scene, camera);
+    }
+  }
+  /* -------------------座標の更新 ここまで------------------- */
+
+
+
+  /* -------------------ノード、エッジ削除 ここから------------------- */
+  function clearScene() {
+    // シーン内のすべての子要素（オブジェクト）を削除
+    //1回で全削除されないため(deleteTimes)回繰り返し
+    for (let i = 0; i < deleteTimes; i++) {
+      // シーンにあるMesh、Lineをクリア
+      scene.children.forEach((child) => {
+        if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
+          scene.remove(child);
+        }
+      });
+
+      // グループにあるMesh、Lineをクリア
+      group.children.forEach((child) => {
+        if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
+          group.remove(child);
+        }
+      });
     }
 
-    // nodePositions 配列の選択されたノードの位置も更新
-    //console.log(nodePositions[randomIndex]);
-    nodePositions[randomIndex] = newPosition;
-
-    //ノードとエッジを消す
-    clearScene();
-    //変更されたノードの位置を再描画
-    renderNetwork(networkData, scene, camera, renderer, nodePositions);
-    
-    // レンダリング
+    // 再描画
     renderer.render(scene, camera);
   }
-  }
+  /* -------------------ノード、エッジ削除 ここまで------------------- */
 
-  // シーンをクリアする関数
-  function clearScene() {
-  // シーン内のすべての子要素（オブジェクト）を削除
-  //1回で全削除されないため(deleteTimes)回繰り返し
-  for (let i = 0; i < deleteTimes; i++) {
-    scene.children.forEach((child) => {
-    if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
-      scene.remove(child);
-    }
-  });
-  }
-  // 再描画
-  renderer.render(scene, camera);
-  }
 
-  //自動設定
+
+  /* -------------------自動設定 ここから------------------- */
   function autoSetting(edgesData){
-  //範囲
-  if(autoRangeSetting){
-    max = edgesData.length/4;
-    min = -max
-  }
-
-  //削除回数
-  if(autodeleteSetting){
-    deleteTimes = edgesData.length/2;
-  }
-
-  if(autoRadius){
-    if(edgesData.length <= 10){
-      radius = 0.2;
-    }else if(edgesData.length <= 100){
-      radius = 0.4;
-    }else{
-      radius = 0.4 * edgesData.length/200;
+    //範囲
+    if(autoRangeSetting){
+      max = edgesData.length/4;
+      min = -max
     }
-  }
 
-  console.log('Max:',max,' , Min:', min,' , DeleteTimes:', deleteTimes,' , DeleteTimes:', radius);
-  }
+    //削除回数
+    if(autodeleteSetting){
+      deleteTimes = edgesData.length/2;
+    }
 
-  // 'u' キーが押されたときにランダムなノードの位置を更新して描画する
+    //半径
+    if(autoRadius){
+      if(edgesData.length <= 10){
+        radius = 0.2;
+      }else if(edgesData.length <= 100){
+        radius = 0.4;
+      }else{
+        radius = 0.4 * edgesData.length/100;
+      }
+    }
+    console.log('Max:',max,' , Min:', min,' , DeleteTimes:', deleteTimes,' , DeleteTimes:', radius);
+  }
+  /* -------------------自動設定 ここまで------------------- */
+
+
+  
+  /* -------------------キーボード操作設定 ここから------------------- */
   document.addEventListener('keydown', (event) => {
-  if (event.key === 'r') {
-    // ランダムなノードの位置を更新して描画する関数
-    updateRandomNode();
-  }else if(event.key === 'a'){
-    // すべてのノードの位置を更新する関数
-    updateAllNode();
-  }else if(event.key === 'p'){
-    //consoleにノードの座標を表示する
-    console.log(nodePositions);
-  }else if(event.key === 'c'){
-    // シーンをクリアする関数
-    clearScene();
-  }else if(event.key === 'n'){
-    //現在のノードの位置に描画する(消した後に戻す用)
-    renderNetwork(networkData, scene, camera, renderer, nodePositions);
-  }
-
+    if (event.key === 'r') {
+      // 'r' キーが押されたときにランダムなノードの位置を更新して描画する関数
+      updateRandomNode();
+    }else if(event.key === 'a'){
+      // 'a' キーが押されたときにすべてのノードの位置を更新する関数
+      updateAllNode();
+    }else if(event.key === 'p'){
+      //'p' キーが押されたときにconsoleにノードの座標を表示する
+      console.log(nodePositions);
+    }else if(event.key === 'c'){
+      // 'c' キーが押されたときにシーンをクリアする関数
+      clearScene();
+    }else if(event.key === 'n'){
+      //'n' キーが押されたときに現在のノードの位置に描画する(消した後に戻す用)
+      renderNetwork(networkData, group, camera, renderer, nodePositions);
+    }
   });
+  /* -------------------キーボード操作設定 ここまで------------------- */
+
+
 
   // 毎フレーム時に実行されるループイベント
   function tick() {
-    // レンダリング
-    // VRモード中はOrbitControlsを無効にする
-     if (!inVRMode) {
-      // controlsの更新
-      controls.update();
-    }
-
-    // コントローラーイベントの処理
+    cleanIntersected();
+    intersectObjects(controller0);
+    intersectObjects(controller1);
+    
     handleController(controller1);
     handleController(controller0);
-
-    // シーンをレンダリング
+    // レンダリング
     renderer.render(scene, camera);
-    }
-
-  // イベントリスナーの追加
-  window.addEventListener("resize", onResize);
+  }
 
   // レンダラーにループ関数を登録
   renderer.setAnimationLoop(tick);
@@ -541,12 +659,3 @@ function init() {
   // リサイズ処理
   window.addEventListener("resize", onResize);
 }
-/*
-@inproceedings{nr,
-     title={The Network Data Repository with Interactive Graph Analytics and Visualization},
-     author={Ryan A. Rossi and Nesreen K. Ahmed},
-     booktitle={AAAI},
-     url={https://networkrepository.com},
-     year={2015}
-}
-*/
