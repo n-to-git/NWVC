@@ -452,7 +452,7 @@ function init() {
         material = new THREE.MeshLambertMaterial({ color: 0xffc0cb });
       } else {
         // 通常のノード
-        geometry = new THREE.BoxGeometry(radius * 2, radius * 2, radius * 2);
+        geometry = new THREE.BoxGeometry(radius * 2.5, radius * 2.5, radius * 2.5);
         material = new THREE.MeshLambertMaterial({ color: 0x7fbfff });
       }
 
